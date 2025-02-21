@@ -1,0 +1,11 @@
+[package]
+name = "consistent-hashing-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Anuj Srivastava <anuj.sixstrings@gmail.com>"]
+
+[lib]
+name = "consistenthash"
+
+[dependencies]
+md5 = "0.7.0"
