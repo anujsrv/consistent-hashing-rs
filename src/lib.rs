@@ -24,11 +24,17 @@ impl Node {
 pub struct ConsistentHash {
     nodes: BTreeMap<Vec<u8>, Node>,
     replicas: HashMap<String, u32>,
+
+    load_per_node: HashMap<String, f64>,
+    load_factor: f64,
+    total_load: u64,
 }
 
 impl ConsistentHash {
     pub fn new() -> ConsistentHash {
         ConsistentHash{
+            load_per_node: HashMap::new(),
+            load_factor: 0.0,
             nodes: BTreeMap::new(),
             replicas: HashMap::new(),
         }
@@ -37,6 +43,7 @@ impl ConsistentHash {
     pub fn add_node(&mut self, node: &Node, num_replicas: u32) {
         let name: &String = node.get_name();
 
+        self.load_per_node.insert(name.clone(), 0.0);
         self.replicas.insert(name.clone(), num_replicas);
         for replica in 0..num_replicas {
             let identifier: String = format!("{}-{}", name, replica);
@@ -65,6 +72,35 @@ impl ConsistentHash {
             return Some(node.clone());
         }
         return None;
+    }
+
+    fn nearest_node_under_load(self, node: Node) -> Option<Node> {
+        let mut count = 0;
+        let mut curr_node = node.clone();
+        loop {
+            if count > self.size() {
+                return None;
+            }
+            if self.check_load(curr_node.get_name().to_string()) {
+                return Some(curr_node);
+            }
+            count += 1;
+        }
+    }
+
+    // checks if the node is below the max allowed load value
+    fn check_load(&self, node_name: String) -> bool {
+        let tot_nodes = self.size();
+        if tot_nodes == 0 {
+            return false;
+        }
+        let avg_load: f64 = self.total_load as f64 / tot_nodes as f64;
+        let max_allowed_load: f64 = (avg_load * self.load_factor).ceil();
+        
+        match self.load_per_node.get(&node_name) {
+            None => false,
+            Some(&val) => (val + 1.0) <= max_allowed_load,
+        }
     }
 
     pub fn remove_node(& mut self, name: String) {
@@ -144,6 +180,10 @@ mod tests {
 
         let mut ch_size = ch.size();
         assert!(ch_size == nodes_count * 5, "count mismatch after add_node. expected: {}, actual: {}", nodes_count * 3, ch_size);    
+
+        ch.remove_node("non_existant".to_string());
+        ch_size = ch.size();
+        assert!(ch_size == nodes_count * 5, "count mismatch after remove_node on non_existant. expected: {}, actual: {}", nodes_count * 5, ch_size);
 
         ch.remove_node("test_node_3".to_string());
         ch_size = ch.size();
