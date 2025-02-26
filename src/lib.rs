@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::ops::Bound::{Included, Unbounded};
 
 use md5;
 
@@ -33,10 +32,12 @@ pub struct ConsistentHash {
 impl ConsistentHash {
     pub fn new() -> ConsistentHash {
         ConsistentHash{
-            load_per_node: HashMap::new(),
-            load_factor: 0.0,
             nodes: BTreeMap::new(),
             replicas: HashMap::new(),
+
+            load_per_node: HashMap::new(),
+            load_factor: 1.25,
+            total_load: 0,
         }
     }
 
@@ -53,33 +54,29 @@ impl ConsistentHash {
         }
     }
 
-    pub fn get_node(&self, name: String) -> Option<Node> {
+    pub fn get_node(&self, key: String) -> Option<Node> {
         if self.nodes.is_empty() {
             return None;
         }
-        let hash: Vec<u8> = md5::compute(name).to_vec();
-
-        // using this since BTreeMap lower_bound has been marked as an experimental API currently.
-        let lower_bound = self.nodes.range((Included(hash), Unbounded)).next();
-        if let Some((_k, node)) = lower_bound {
-            return Some(node.clone());
-        }
-
-        // if lower_bound points to the end of the map, that means we need to go
-        // around to the first element
-        let first_entry = self.nodes.first_key_value();
-        if let Some((_k, node)) = first_entry {
-            return Some(node.clone());
-        }
-        return None;
+        self.nearest_node_under_load(key)
     }
 
-    fn nearest_node_under_load(self, node: Node) -> Option<Node> {
+    fn nearest_node_under_load(&self, key: String) -> Option<Node> {
+        let hash: Vec<u8> = md5::compute(key).to_vec();
+        // using this since BTreeMap lower_bound has been marked as an experimental API currently.
+        let mut iter = self.nodes.range(hash..);
         let mut count = 0;
-        let mut curr_node = node.clone();
         loop {
             if count > self.size() {
                 return None;
+            }
+            let curr_node: Node;
+            if let Some((_k, node)) = iter.next() {
+                curr_node = node.clone();
+            } else {
+                // initialize to the first node in the tree
+                iter = self.nodes.range(vec![0]..);
+                continue;
             }
             if self.check_load(curr_node.get_name().to_string()) {
                 return Some(curr_node);
@@ -101,6 +98,20 @@ impl ConsistentHash {
             None => false,
             Some(&val) => (val + 1.0) <= max_allowed_load,
         }
+    }
+
+    pub fn assign_key(&mut self, key: String) {
+        if let Some(node) = self.get_node(key) {
+            let node_name = node.get_name();
+            let load = match self.load_per_node.get(node_name) {
+                None => 0.0,
+                Some(&val) => val,
+            };
+            self.load_per_node.insert(node_name.to_string(), load + 1.0);
+            self.total_load += 1;
+            return;
+        }
+        println!("no node available to be assigned")
     }
 
     pub fn remove_node(& mut self, name: String) {
