@@ -24,7 +24,7 @@ pub struct ConsistentHash {
     nodes: BTreeMap<Vec<u8>, Node>,
     replicas: HashMap<String, u32>,
 
-    load_per_node: HashMap<String, f64>,
+    load_per_node: HashMap<String, u64>,
     load_factor: f64,
     total_load: u64,
 }
@@ -36,17 +36,26 @@ impl ConsistentHash {
             replicas: HashMap::new(),
 
             load_per_node: HashMap::new(),
-            load_factor: 1.25,
+            load_factor: 1.0,
             total_load: 0,
         }
     }
 
+    pub fn with_load_factor(load_factor: f64) -> ConsistentHash {
+        let mut ch = ConsistentHash::new();
+        ch.load_factor = load_factor;
+        return ch;
+    }
+
     pub fn add_node(&mut self, node: &Node, num_replicas: u32) {
         let name: &String = node.get_name();
+            let hash: Vec<u8> = md5::compute(name).to_vec();
 
-        self.load_per_node.insert(name.clone(), 0.0);
+            self.nodes.insert(hash, node.clone());
+
+        self.load_per_node.insert(name.clone(), 0);
         self.replicas.insert(name.clone(), num_replicas);
-        for replica in 0..num_replicas {
+        for replica in 1..num_replicas {
             let identifier: String = format!("{}-{}", name, replica);
             let hash: Vec<u8> = md5::compute(identifier).to_vec();
 
@@ -91,12 +100,15 @@ impl ConsistentHash {
         if tot_nodes == 0 {
             return false;
         }
-        let avg_load: f64 = self.total_load as f64 / tot_nodes as f64;
-        let max_allowed_load: f64 = (avg_load * self.load_factor).ceil();
+        let mut avg_load: f64 = self.total_load as f64 / tot_nodes as f64;
+        if avg_load == 0.0 {
+            avg_load = 1.0;
+        }
+        let max_allowed_load: u64 = (avg_load * self.load_factor).ceil() as u64;
         
         match self.load_per_node.get(&node_name) {
             None => false,
-            Some(&val) => (val + 1.0) <= max_allowed_load,
+            Some(&val) => (val + 1) <= max_allowed_load,
         }
     }
 
@@ -104,14 +116,14 @@ impl ConsistentHash {
         if let Some(node) = self.get_node(key) {
             let node_name = node.get_name();
             let load = match self.load_per_node.get(node_name) {
-                None => 0.0,
+                None => 0,
                 Some(&val) => val,
             };
-            self.load_per_node.insert(node_name.to_string(), load + 1.0);
+            self.load_per_node.insert(node_name.to_string(), load + 1);
             self.total_load += 1;
             return;
         }
-        println!("no node available to be assigned")
+        println!("ERR: no node available to be assigned")
     }
 
     pub fn remove_node(& mut self, name: String) {
@@ -123,12 +135,16 @@ impl ConsistentHash {
             None => return,
             Some(&val) => val
         };
-        for replica in 0..num_replicas {
+        let hash: Vec<u8> = md5::compute(&node_name).to_vec();
+        self.nodes.remove(&hash);
+        for replica in 1..num_replicas {
             let identifier: String = format!("{}-{}", name, replica);
             let hash: Vec<u8> = md5::compute(identifier).to_vec();
 
             self.nodes.remove(&hash);
         }
+        self.total_load -= self.load_per_node[&node_name];
+        self.load_per_node.remove(&node_name);
 
         self.replicas.remove(&name);
     }
@@ -164,8 +180,8 @@ mod tests {
         return test_nodes;
     }
 
-    fn setup(nodes: Vec<Node>, replica_count: u32) -> ConsistentHash {
-        let mut ch: ConsistentHash = ConsistentHash::new();
+    fn setup(nodes: Vec<Node>, replica_count: u32, load_factor: f64) -> ConsistentHash {
+        let mut ch: ConsistentHash = ConsistentHash::with_load_factor(load_factor);
 
         for node in nodes.iter() {
             ch.add_node(&node, replica_count);
@@ -177,7 +193,7 @@ mod tests {
     fn add_nodes() {
         let nodes_count = 5;
         let test_nodes = nodes_fixture(nodes_count);
-        let ch = setup(test_nodes, 3);
+        let ch = setup(test_nodes, 3, 1.0);
 
         let ch_size = ch.size();
         assert!(ch_size == nodes_count * 3, "count mismatch. expected: {}, actual: {}", nodes_count * 3, ch_size);    
@@ -187,7 +203,7 @@ mod tests {
     fn remove_nodes() {
         let nodes_count = 7;
         let test_nodes = nodes_fixture(nodes_count);
-        let mut ch = setup(test_nodes, 5);
+        let mut ch = setup(test_nodes, 5, 1.0);
 
         let mut ch_size = ch.size();
         assert!(ch_size == nodes_count * 5, "count mismatch after add_node. expected: {}, actual: {}", nodes_count * 3, ch_size);    
@@ -205,13 +221,34 @@ mod tests {
     fn get_nodes() {
         let nodes_count = 7;
         let test_nodes = nodes_fixture(nodes_count);
-        let mut ch = setup(test_nodes, 3);
+        let mut ch = setup(test_nodes, 3, 1.0);
 
-        let mut matched_node = ch.get_node(String::from("test_node")).unwrap();
-        assert_eq!(matched_node, Node::new(String::from("test_node_6")));
+        let mut matched_node = ch.get_node(String::from("test_key1")).unwrap();
+        assert_eq!(matched_node, Node::new(String::from("test_node_1")));
 
         ch.add_node(&Node::new(String::from("test_node_8")), 3);
-        matched_node = ch.get_node(String::from("test_node")).unwrap();
-        assert_eq!(matched_node, Node::new(String::from("test_node_6")));
+        matched_node = ch.get_node(String::from("test_key1")).unwrap();
+        assert_eq!(matched_node, Node::new(String::from("test_node_1")));
+    }
+
+    #[test]
+    fn assign_key() {
+        let nodes_count = 3;
+        let test_nodes = nodes_fixture(nodes_count);
+        let mut ch = setup(test_nodes, 0, 1.0);
+
+        let matched_node = ch.get_node(String::from("test_key1")).unwrap();
+        assert_eq!(matched_node, Node::new(String::from("test_node_1")));
+
+        assert_eq!(ch.total_load, 0);
+
+        ch.assign_key(String::from("test_key1"));
+        assert_eq!(ch.total_load, 1);
+        ch.assign_key(String::from("test_key2"));
+        assert_eq!(ch.total_load, 2);
+        ch.assign_key(String::from("test_key3"));
+        assert_eq!(ch.total_load, 3);
+        ch.assign_key(String::from("test_key4"));
+        assert_eq!(ch.total_load, 3);
     }
 }
