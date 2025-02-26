@@ -1,3 +1,4 @@
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache-yellow.svg)](https://opensource.org/license/apache-2-0)
 ![CI](https://img.shields.io/github/actions/workflow/status/anujsrv/consistent-hashing-rs/rust.yml)
 # Consistent Hashing with bounded loads implementation in Rust
 
