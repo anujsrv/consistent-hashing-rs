@@ -1,8 +1,10 @@
 [package]
 name = "consistent-hashing-rs"
+description = "Consistent hashing with bounded loads implementation in Rust"
 version = "0.1.0"
 edition = "2021"
 authors = ["Anuj Srivastava <anuj.sixstrings@gmail.com>"]
+license-file = "LICENSE"
 
 [lib]
 name = "consistenthash"
