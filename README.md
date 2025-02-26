@@ -1,3 +1,4 @@
+![CI](https://img.shields.io/github/actions/workflow/status/anujsrv/consistent-hashing-rs/rust.yml)
 # Consistent Hashing with bounded loads implementation in Rust
 
 [Consistent hashing](https://en.wikipedia.org/wiki/Consistent_hashing) with bounded loads implementation in Rust.
